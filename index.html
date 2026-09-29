@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colour-Word Experiment</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f6f7fb;color:#202124;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{width:min(920px,94vw);background:#fff;border-radius:18px;padding:36px;box-shadow:0 8px 30px rgba(0,0,0,.10);text-align:center}
+h1{margin-top:0} p{line-height:1.55}
+input{width:min(420px,90%);padding:13px;border:1px solid #ccc;border-radius:9px;font-size:16px;margin:12px 0}
+button{border:none;border-radius:10px;padding:13px 22px;font-size:16px;cursor:pointer}
+.primary{background:#222;color:#fff}.primary:hover{opacity:.88}
+.hidden{display:none!important}
+#progress{font-size:15px;color:#666;margin-bottom:18px}
+#fixation{font-size:44px;min-height:55px;display:flex;align-items:center;justify-content:center;color:#777}
+#stimulus{font-size:clamp(52px,9vw,96px);font-weight:800;margin:28px 0;min-height:115px;display:flex;align-items:center;justify-content:center}
+.color-buttons{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;max-width:780px;margin:auto}
+.color-btn{color:#fff;min-height:58px;font-weight:700;border:3px solid transparent}
+.color-btn:focus{outline:none;border-color:#111}
+.red{background:#e53935}.blue{background:#1e88e5}.green{background:#43a047}
+.yellow{background:#f4c20d;color:#111}.purple{background:#8e44ad}
+.orange{background:#f57c00}.teal{background:#00897b}
+.warning{color:#b00020;font-size:14px;min-height:20px}
+#experimentScreen{user-select:none}
+@media(max-width:650px){.card{padding:24px 16px}.color-buttons{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="card">
+
+<section id="startScreen">
+<h1>Colour-Word Experiment</h1>
+<p>
+You will see a colour word on the screen. Ignore what the word says and
+click the button matching the <strong>colour of the word</strong>.
+</p>
+<p>Respond as quickly and accurately as you can. There will be <strong>60 trials</strong>.</p>
+<input id="participantId" type="text" placeholder="Participant ID (e.g. P01)" autocomplete="off">
+<div class="warning" id="startWarning"></div>
+<button class="primary" id="startBtn">Start Experiment</button>
+</section>
+
+<section id="practiceScreen" class="hidden">
+<h1>Practice</h1>
+<p>Complete 5 practice trials to get used to the task.</p>
+<button class="primary" id="practiceBtn">Start Practice</button>
+</section>
+
+<section id="practiceCompleteScreen" class="hidden">
+<h1>Practice Complete</h1>
+<p>You have completed the practice trials.</p>
+<p>The actual experiment will now begin. You will complete <strong>60 trials</strong>.</p>
+<button class="primary" id="beginExperimentBtn">Start Experiment</button>
+</section>
+
+<section id="experimentScreen" class="hidden">
+<div id="progress">Trial 1 of 60</div>
+<div id="fixation">+</div>
+<div id="stimulus"></div>
+<div class="color-buttons" id="colorButtons"></div>
+</section>
+
+<section id="doneScreen" class="hidden">
+<h1>Thank you!</h1>
+<p>The experiment is complete.</p>
+<p>Your responses have been recorded. Please let the researcher know you have finished.</p>
+<p><strong>Your individual results will not be displayed.</strong></p>
+</section>
+
+</div>
+
+<script>
+"use strict";
+
+// AFTER DEPLOYING THE GOOGLE APPS SCRIPT, paste its Web App URL here.
+const DATA_ENDPOINT = "PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+const COLORS = {
+  red:"#e53935", blue:"#1e88e5", green:"#43a047",
+  yellow:"#f4c20d", purple:"#8e44ad", orange:"#f57c00", teal:"#00897b"
+};
+const COLOR_NAMES = Object.keys(COLORS);
+const TOTAL_TRIALS = 60;
+const CONGRUENT_TRIALS = 30;
+const INCONGRUENT_TRIALS = 30;
+
+let participantId="", trials=[], currentTrial=0, reactionStart=null;
+let results=[], practiceMode=false, practiceTrials=[], practiceIndex=0;
+let awaitingResponse=false, participantData=[];
+
+const startScreen=document.getElementById("startScreen");
+const practiceScreen=document.getElementById("practiceScreen");
+const practiceCompleteScreen=document.getElementById("practiceCompleteScreen");
+const experimentScreen=document.getElementById("experimentScreen");
+const doneScreen=document.getElementById("doneScreen");
+const stimulus=document.getElementById("stimulus");
+const fixation=document.getElementById("fixation");
+const progress=document.getElementById("progress");
+const colorButtons=document.getElementById("colorButtons");
+
+function shuffle(a){
+  const x=[...a];
+  for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}
+  return x;
+}
+
+function makeBalancedTrials(){
+  const congruent=[];
+  COLOR_NAMES.forEach(c=>{
+    for(let i=0;i<Math.floor(CONGRUENT_TRIALS/COLOR_NAMES.length);i++)
+      congruent.push({word:c.toUpperCase(),inkColor:c,condition:"Congruent"});
+  });
+  // Add the remaining congruent trials to the first two colours.
+  for(let i=congruent.length;i<CONGRUENT_TRIALS;i++){
+    const c=COLOR_NAMES[i%COLOR_NAMES.length];
+    congruent.push({word:c.toUpperCase(),inkColor:c,condition:"Congruent"});
+  }
+
+  // Incongruent trials: each ink colour occurs 4 or 5 times,
+  // and the word is always a different colour. Pairings are varied
+  // so the same mismatch is not repeatedly presented.
+  const incongruent=[];
+  COLOR_NAMES.forEach((inkColor, inkIndex)=>{
+    const n=4 + (inkIndex < (INCONGRUENT_TRIALS%COLOR_NAMES.length) ? 1 : 0);
+    const others=COLOR_NAMES.filter(c=>c!==inkColor);
+    for(let i=0;i<n;i++){
+      const wordColor=others[(i*2 + inkIndex)%others.length];
+      incongruent.push({
+        word:wordColor.toUpperCase(),
+        inkColor,
+        condition:"Incongruent"
+      });
+    }
+  });
+
+  return shuffle([...congruent,...incongruent]).slice(0,TOTAL_TRIALS);
+}
+
+function makePracticeTrials(){
+  return shuffle([
+    {word:"RED",inkColor:"red",condition:"Practice"},
+    {word:"BLUE",inkColor:"green",condition:"Practice"},
+    {word:"GREEN",inkColor:"green",condition:"Practice"},
+    {word:"PURPLE",inkColor:"yellow",condition:"Practice"},
+    {word:"ORANGE",inkColor:"teal",condition:"Practice"}
+  ]);
+}
+
+function showScreen(s){
+  [startScreen,practiceScreen,practiceCompleteScreen,experimentScreen,doneScreen].forEach(x=>x.classList.add("hidden"));
+  s.classList.remove("hidden");
+}
+
+function buildButtons(){
+  colorButtons.innerHTML="";
+  // Keep the physical mapping stable across trials to avoid adding
+  // a separate button-search/mapping task to the Stroop manipulation.
+  COLOR_NAMES.forEach(c=>{
+    const b=document.createElement("button");
+    b.className=`color-btn ${c}`;
+    b.dataset.color=c;
+    b.textContent=c.toUpperCase();
+    b.addEventListener("click",()=>handleResponse(c));
+    colorButtons.appendChild(b);
+  });
+}
+
+function startExperiment(){
+  participantId=document.getElementById("participantId").value.trim();
+  if(!participantId){
+    document.getElementById("startWarning").textContent="Please enter a participant ID.";
+    return;
+  }
+  document.getElementById("startWarning").textContent="";
+  trials=makeBalancedTrials();
+  results=[];
+  currentTrial=0;
+  showScreen(practiceScreen);
+}
+
+function startPractice(){
+  practiceTrials=makePracticeTrials();
+  practiceIndex=0;
+  practiceMode=true;
+  buildButtons();
+  showScreen(experimentScreen);
+  showNextTrial();
+}
+
+function startMainExperiment(){
+  practiceMode=false;
+  currentTrial=0;
+  results=[];
+  showScreen(experimentScreen);
+  showNextTrial();
+}
+
+function showNextTrial(){
+  awaitingResponse=false;
+  reactionStart=null;
+  stimulus.textContent="";
+  fixation.textContent="+";
+
+  if(practiceMode && practiceIndex>=practiceTrials.length){
+  practiceMode=false;
+  showScreen(practiceCompleteScreen);
+  return;
+}
+  if(!practiceMode && currentTrial>=TOTAL_TRIALS){finishExperiment();return}
+
+  const trial=practiceMode?practiceTrials[practiceIndex]:trials[currentTrial];
+  progress.textContent=practiceMode
+    ? `Practice trial ${practiceIndex+1} of ${practiceTrials.length}`
+    : `Trial ${currentTrial+1} of ${TOTAL_TRIALS}`;
+
+  // Variable blank/fixation interval helps prevent participants from
+  // anticipating the exact moment of stimulus onset.
+  const delay=300+Math.random()*200;
+
+  setTimeout(()=>{
+    fixation.textContent="";
+    stimulus.textContent=trial.word;
+    stimulus.style.color=COLORS[trial.inkColor];
+
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        reactionStart=performance.now();
+        awaitingResponse=true;
+      });
+    });
+  },delay);
+}
+
+function handleResponse(responseColor){
+  if(!awaitingResponse || reactionStart===null)return;
+  awaitingResponse=false;
+
+  const trial=practiceMode?practiceTrials[practiceIndex]:trials[currentTrial];
+  const reactionTime=Math.round(performance.now()-reactionStart);
+  const correct=responseColor===trial.inkColor;
+
+  if(practiceMode){
+    practiceIndex++;
+    setTimeout(showNextTrial,80);
+    return;
+  }
+
+  results.push({
+    participantId,
+    trialNumber:currentTrial+1,
+    condition:trial.condition,
+    wordShown:trial.word,
+    inkColor:trial.inkColor,
+    response:responseColor,
+    correct:correct?"Yes":"No",
+    reactionTimeMs:reactionTime
+  });
+  currentTrial++;
+  setTimeout(showNextTrial,80);
+}
+
+async function finishExperiment(){
+  showScreen(doneScreen);
+
+  // Keep the participant-facing screen free of results.
+  // Send the complete trial dataset to the researcher's Google Sheet.
+  const payload = {
+    participantId: participantId,
+    completedAt: new Date().toISOString(),
+    results: results
+  };
+
+  if (DATA_ENDPOINT.includes("PASTE_YOUR_")) {
+    console.warn("DATA_ENDPOINT has not been configured.");
+    localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
+    return;
+  }
+
+  try {
+    await fetch(DATA_ENDPOINT, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify(payload)
+    });
+
+    localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
+  } catch (error) {
+    console.error("Could not send experiment data:", error);
+    localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
+  }
+}
+
+// Researcher-only export: Ctrl+Shift+D downloads the current participant's
+// data. It is intentionally not shown on the participant-facing screen.
+function exportResearcherData(){
+  const saved=localStorage.getItem("stroop_latest_dataset");
+  if(!saved){alert("No completed participant data is stored in this browser.");return}
+  const data=JSON.parse(saved);
+  const headers=["Participant ID","Trial","Condition","Word Shown","Ink Colour","Response","Correct","Reaction Time (ms)"];
+  const rows=(data.results||[]).map(r=>[
+    r.participantId,r.trialNumber,r.condition,r.wordShown,
+    r.inkColor,r.response,r.correct,r.reactionTimeMs
+  ]);
+  const csv=[headers,...rows].map(row=>row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`stroop_${data.participantId}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById("startBtn").addEventListener("click",startExperiment);
+document.getElementById("practiceBtn").addEventListener("click",startPractice);
+document.getElementById("beginExperimentBtn").addEventListener("click",startMainExperiment);
+document.addEventListener("keydown",e=>{
+  if(e.ctrlKey && e.shiftKey && e.key.toLowerCase()==="d"){
+    e.preventDefault();
+    exportResearcherData();
+  }
+});
+</script>
+</body>
+</html>
