@@ -75,7 +75,7 @@ click the button matching the <strong>colour of the word</strong>.
 "use strict";
 
 // AFTER DEPLOYING THE GOOGLE APPS SCRIPT, paste its Web App URL here.
-const DATA_ENDPOINT = "https://script.google.com/macros/s/AKfycbz8TwQWtJbyOUPDxUeKk5-2qzUFIQqmzsVb304FixdM4gbi7KyxqJMsFqr7SnZ8iAH7MQ/exec";
+const DATA_ENDPOINT = "https://script.google.com/macros/s/AKfycbySMkX3jla5CNbNd-jA9AAJEqVGfCbRYdaeKBajxAl47kz0VAn8F5iosQi12zcmZ6U23g/exec";
 
 const COLORS = {
   red:"#e53935", blue:"#1e88e5", green:"#43a047",
@@ -261,9 +261,38 @@ function handleResponse(responseColor){
   setTimeout(showNextTrial,80);
 }
 
-async function finishExperiment(){
-  showScreen(doneScreen);
+function sendPayloadToGoogleSheet(payload){
+  // Use a normal HTML form POST instead of fetch().
+  // This avoids cross-origin/CORS issues with Google Apps Script web apps.
+  const iframe = document.createElement("iframe");
+  iframe.name = "stroopDataFrame";
+  iframe.style.display = "none";
+  document.body.appendChild(iframe);
 
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = DATA_ENDPOINT;
+  form.target = "stroopDataFrame";
+  form.style.display = "none";
+
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "payload";
+  input.value = JSON.stringify(payload);
+  form.appendChild(input);
+
+  document.body.appendChild(form);
+  form.submit();
+
+  // Give the browser a moment to start the request before the participant
+  // continues. The participant never sees the response.
+  setTimeout(() => {
+    form.remove();
+    iframe.remove();
+  }, 3000);
+}
+
+function finishExperiment(){
   // Keep the participant-facing screen free of results.
   // Send the complete trial dataset to the researcher's Google Sheet.
   const payload = {
@@ -275,22 +304,19 @@ async function finishExperiment(){
   if (DATA_ENDPOINT.includes("PASTE_YOUR_")) {
     console.warn("DATA_ENDPOINT has not been configured.");
     localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
+    showScreen(doneScreen);
     return;
   }
 
   try {
-    await fetch(DATA_ENDPOINT, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify(payload)
-    });
-
+    sendPayloadToGoogleSheet(payload);
     localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
   } catch (error) {
     console.error("Could not send experiment data:", error);
     localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
   }
+
+  showScreen(doneScreen);
 }
 
 // Researcher-only export: Ctrl+Shift+D downloads the current participant's
