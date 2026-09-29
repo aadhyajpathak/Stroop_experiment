@@ -63,10 +63,12 @@ click the button matching the <strong>colour of the word</strong>.
 </section>
 
 <section id="doneScreen" class="hidden">
+<button id="downloadDataBtn" type="button">Download Data File</button>
 <h1>Thank you!</h1>
 <p>The experiment is complete.</p>
 <p>Your responses have been recorded. Please let the researcher know you have finished.</p>
 <p><strong>Your individual results will not be displayed.</strong></p>
+<p>Your data file has been downloaded. Please send the downloaded CSV file to the researcher without opening or editing it.</p>
 </section>
 
 </div>
@@ -272,15 +274,12 @@ function handleResponse(responseColor){
 }
 
 function sendTrialToGoogleSheet(trialData){
-  // Remote Google submission is disabled for this version.
-  // All completed trials are stored locally and exported at the end.
+  // Remote collection is disabled. Results are exported locally at the end.
   return true;
 }
 
 function finishExperiment(){
-  downloadExperimentData();
-  // Data is sent one trial at a time, so there is no large final payload to submit.
-  // Keep a local backup as an additional safety net.
+  // Save a local backup and automatically download the participant's CSV.
   const payload = {
     participantId: participantId,
     completedAt: new Date().toISOString(),
@@ -288,6 +287,27 @@ function finishExperiment(){
   };
 
   localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
+
+  const headers=["Participant ID","Trial","Condition","Word Shown","Ink Colour","Response","Correct","Reaction Time (ms)"];
+  const rows=(results||[]).map(r=>[
+    r.participantId,r.trialNumber,r.condition,r.wordShown,
+    r.inkColor,r.response,r.correct,r.reactionTimeMs
+  ]);
+  const csv=[headers,...rows]
+    .map(row=>row.map(v=>`"${String(v ?? "").replace(/"/g,'""')}"`).join(","))
+    .join("\n");
+
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`stroop_${participantId}.csv`;
+  a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+
   showScreen(doneScreen);
 }
 
@@ -310,6 +330,7 @@ function exportResearcherData(){
   URL.revokeObjectURL(url);
 }
 
+document.getElementById("downloadDataBtn").addEventListener("click",exportResearcherData);
 document.getElementById("startBtn").addEventListener("click",startExperiment);
 document.getElementById("practiceBtn").addEventListener("click",startPractice);
 document.getElementById("beginExperimentBtn").addEventListener("click",startMainExperiment);
@@ -319,49 +340,6 @@ document.addEventListener("keydown",e=>{
     exportResearcherData();
   }
 });
-
-function csvEscape(value) {
-  const s = String(value ?? "");
-  return '"' + s.replace(/"/g, '""') + '"';
-}
-
-function downloadExperimentData() {
-  const rows = results || [];
-  if (!Array.isArray(rows) || rows.length === 0) return;
-
-  const headers = [
-    "Participant ID", "Trial", "Condition", "Word Shown",
-    "Ink Colour", "Response", "Correct", "Reaction Time (ms)"
-  ];
-
-  const csvRows = [headers.map(csvEscape).join(",")];
-
-  for (const r of rows) {
-    csvRows.push([
-      r.participantId ?? r.participantID ?? r.id ?? "",
-      r.trial ?? "",
-      r.condition ?? "",
-      r.word ?? r.wordShown ?? "",
-      r.inkColour ?? r.inkColor ?? r.color ?? r.colour ?? "",
-      r.response ?? "",
-      r.correct ?? "",
-      r.reactionTime ?? r.reactionTimeMs ?? r.rt ?? ""
-    ].map(csvEscape).join(","));
-  }
-
-  const blob = new Blob([csvRows.join("\\n")], {type: "text/csv;charset=utf-8"});
-  const url = URL.createObjectURL(blob);
-  const participant =
-    rows[0].participantId ?? rows[0].participantID ?? rows[0].id ?? "participant";
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `stroop_${participant}_${new Date().toISOString().slice(0,10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 </script>
 </body>
 </html>
