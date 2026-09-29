@@ -272,49 +272,13 @@ function handleResponse(responseColor){
 }
 
 function sendTrialToGoogleSheet(trialData){
-  // Send each completed trial as a small normal HTML form POST.
-  // This avoids CORS issues and avoids sending one large JSON payload at the end.
-  const iframe = document.createElement("iframe");
-  iframe.name = "stroopTrialFrame_" + Date.now() + "_" + Math.random().toString(36).slice(2);
-  iframe.style.display = "none";
-  document.body.appendChild(iframe);
-
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = DATA_ENDPOINT;
-  form.target = iframe.name;
-  form.style.display = "none";
-
-  const fields = {
-    type: "trial",
-    participantId: trialData.participantId,
-    trial: trialData.trialNumber,
-    condition: trialData.condition,
-    wordShown: trialData.wordShown,
-    inkColor: trialData.inkColor,
-    response: trialData.response,
-    correct: trialData.correct,
-    reactionTimeMs: trialData.reactionTimeMs
-  };
-
-  Object.keys(fields).forEach(key => {
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = key;
-    input.value = String(fields[key] ?? "");
-    form.appendChild(input);
-  });
-
-  document.body.appendChild(form);
-  form.submit();
-
-  setTimeout(() => {
-    form.remove();
-    iframe.remove();
-  }, 5000);
+  // Remote Google submission is disabled for this version.
+  // All completed trials are stored locally and exported at the end.
+  return true;
 }
 
 function finishExperiment(){
+  downloadExperimentData();
   // Data is sent one trial at a time, so there is no large final payload to submit.
   // Keep a local backup as an additional safety net.
   const payload = {
@@ -355,6 +319,49 @@ document.addEventListener("keydown",e=>{
     exportResearcherData();
   }
 });
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+function downloadExperimentData() {
+  const rows = results || [];
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  const headers = [
+    "Participant ID", "Trial", "Condition", "Word Shown",
+    "Ink Colour", "Response", "Correct", "Reaction Time (ms)"
+  ];
+
+  const csvRows = [headers.map(csvEscape).join(",")];
+
+  for (const r of rows) {
+    csvRows.push([
+      r.participantId ?? r.participantID ?? r.id ?? "",
+      r.trial ?? "",
+      r.condition ?? "",
+      r.word ?? r.wordShown ?? "",
+      r.inkColour ?? r.inkColor ?? r.color ?? r.colour ?? "",
+      r.response ?? "",
+      r.correct ?? "",
+      r.reactionTime ?? r.reactionTimeMs ?? r.rt ?? ""
+    ].map(csvEscape).join(","));
+  }
+
+  const blob = new Blob([csvRows.join("\\n")], {type: "text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const participant =
+    rows[0].participantId ?? rows[0].participantID ?? rows[0].id ?? "participant";
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `stroop_${participant}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 </script>
 </body>
 </html>
