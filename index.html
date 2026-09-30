@@ -63,6 +63,8 @@ click the button matching the <strong>colour of the word</strong>.
 </section>
 
 <section id="doneScreen" class="hidden">
+<button id="shareDataBtn" type="button">Share Data File</button>
+<button id="copyDataBtn" type="button">Copy Data</button>
 <button id="downloadDataBtn" type="button" class="primary">Download Data File</button>
 <h1>Thank you!</h1>
 <p>The experiment is complete.</p>
@@ -340,5 +342,52 @@ document.addEventListener("keydown",e=>{
   }
 });
 </script>
+
+<script>
+async function shareResearcherData(){
+  const result = getSavedCsv();
+  if(!result) return;
+  const file = new File(
+    [result.csv],
+    `stroop_${result.data.participantId}.csv`,
+    {type:"text/csv"}
+  );
+  if(navigator.share && navigator.canShare &&
+     navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({
+        title:"Stroop Experiment Data",
+        text:"Please send this data file to the researcher.",
+        files:[file]
+      });
+      return;
+    }catch(e){
+      if(e.name === "AbortError") return;
+    }
+  }
+  copyResearcherData();
+}
+
+async function copyResearcherData(){
+  const result = getSavedCsv();
+  if(!result) return;
+  try{
+    await navigator.clipboard.writeText(result.csv);
+    alert("Data copied. Paste it into WhatsApp or email and send it to the researcher.");
+  }catch(e){
+    const ta=document.createElement("textarea");
+    ta.value=result.csv;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    alert("Data copied. Paste it into WhatsApp or email and send it to the researcher.");
+  }
+}
+
+document.getElementById("shareDataBtn")?.addEventListener("click", shareResearcherData);
+document.getElementById("copyDataBtn")?.addEventListener("click", copyResearcherData);
+</script>
+
 </body>
 </html>
