@@ -63,15 +63,12 @@ click the button matching the <strong>colour of the word</strong>.
 </section>
 
 <section id="doneScreen" class="hidden">
-<button id="shareDataBtn" type="button">Share Data File</button>
-<button id="copyDataBtn" type="button">Copy Data</button>
-<button id="downloadDataBtn" type="button" class="primary">Download Data File</button>
+<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button id="downloadDataBtn" type="button" class="primary">Download Data File</button><button id="shareDataBtn" type="button" class="primary">Share Data File</button></div>
 <h1>Thank you!</h1>
 <p>The experiment is complete.</p>
-<p>Your responses have been recorded.</p>
+<p>Your responses have been recorded. Please let the researcher know you have finished.</p>
 <p><strong>Your individual results will not be displayed.</strong></p>
-<p><strong>If the file does not download automatically, please use “Share Data File” or “Copy Data”.</strong></p>
-<p>Then send the downloaded CSV file to the researcher without opening or editing it.</p>
+<p><strong>Click “Download Data File” below.</strong> Then send the downloaded CSV file to the researcher without opening or editing it.</p>
 </section>
 
 </div>
@@ -280,63 +277,8 @@ function sendTrialToGoogleSheet(trialData){
   return true;
 }
 
-function getCsvString(rows){
-  const headers=["Participant ID","Trial","Condition","Word Shown","Ink Colour","Response","Correct","Reaction Time (ms)"];
-  const csvRows = (rows || []).map(r => [
-    r.participantId,
-    r.trialNumber,
-    r.condition,
-    r.wordShown,
-    r.inkColor,
-    r.response,
-    r.correct,
-    r.reactionTimeMs
-  ]);
-
-  return [headers, ...csvRows]
-    .map(row => row.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(","))
-    .join("\r\n");
-}
-
-function isIOSSafari(){
-  return /iPhone|iPad|iPod/i.test(navigator.userAgent) &&
-         /Safari/i.test(navigator.userAgent) &&
-         !/CriOS|FxiOS|Chrome/i.test(navigator.userAgent);
-}
-
-function triggerDownload(filename, csvText){
-  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.style.display = "none";
-
-  document.body.appendChild(a);
-
-  setTimeout(() => {
-    try {
-      a.click();
-    } catch (e) {}
-
-    setTimeout(() => {
-      a.remove();
-      URL.revokeObjectURL(url);
-    }, 700);
-  }, isIOSSafari() ? 200 : 50);
-}
-
-function getSavedCsv(){
-  const saved = localStorage.getItem("stroop_latest_dataset");
-  if(!saved) return null;
-  const data = JSON.parse(saved);
-  return {
-    csv: getCsvString(data.results || []),
-    data: data
-  };
-}
-
 function finishExperiment(){
+  // Save a local backup and automatically download the participant's CSV.
   const payload = {
     participantId: participantId,
     completedAt: new Date().toISOString(),
@@ -345,52 +287,72 @@ function finishExperiment(){
 
   localStorage.setItem("stroop_latest_dataset", JSON.stringify(payload));
 
-  const csvText = getCsvString(results);
-  const filename = `stroop_${participantId}.csv`;
+  const headers=["Participant ID","Trial","Condition","Word Shown","Ink Colour","Response","Correct","Reaction Time (ms)"];
+  const rows=(results||[]).map(r=>[
+    r.participantId,r.trialNumber,r.condition,r.wordShown,
+    r.inkColor,r.response,r.correct,r.reactionTimeMs
+  ]);
+  const csv=[headers,...rows]
+    .map(row=>row.map(v=>`"${String(v ?? "").replace(/"/g,'""')}"`).join(","))
+    .join("\r\n");
 
-  triggerDownload(filename, csvText);
-
-  if (isIOSSafari()) {
-    const mobileMsg = document.createElement("p");
-    mobileMsg.style.marginTop = "12px";
-    mobileMsg.style.color = "#b00020";
-    mobileMsg.style.fontWeight = "600";
-    mobileMsg.textContent = "If the file does not download automatically, use Share Data File or Copy Data below.";
-    doneScreen.appendChild(mobileMsg);
-  }
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`stroop_${participantId}.csv`;
+  a.style.display="none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 
   showScreen(doneScreen);
 }
 
+function getSavedCsv(){
+  const saved=localStorage.getItem("stroop_latest_dataset");
+  if(!saved){alert("No completed participant data is stored in this browser.");return null}
+  const data=JSON.parse(saved);
+  const headers=["Participant ID","Trial","Condition","Word Shown","Ink Colour","Response","Correct","Reaction Time (ms)"];
+  const rows=(data.results||[]).map(r=>[
+    r.participantId,r.trialNumber,r.condition,r.wordShown,
+    r.inkColor,r.response,r.correct,r.reactionTimeMs
+  ]);
+  const csv=[headers,...rows].map(row=>row.map(v=>`"${String(v ?? "").replace(/"/g,'""')}"`).join(",")).join("\r\n");
+  return {data,csv};
+}
+
 function exportResearcherData(){
-  const saved = localStorage.getItem("stroop_latest_dataset");
-  if (!saved) {
-    alert("No completed participant data is stored in this browser.");
-    return;
+  const result=getSavedCsv();
+  if(!result)return;
+  const blob=new Blob([result.csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`stroop_${result.data.participantId}.csv`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+async function shareResearcherData(){
+  const result=getSavedCsv();
+  if(!result)return;
+  const filename=`stroop_${result.data.participantId}.csv`;
+  const file=new File([result.csv],filename,{type:"text/csv"});
+  if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({title:"Stroop Experiment Data",text:"Please send this data file to Aadhya without editing it.",files:[file]});
+      return;
+    }catch(err){
+      if(err && err.name==="AbortError") return;
+    }
   }
-
-  const data = JSON.parse(saved);
-  const csvText = getCsvString(data.results || []);
-  const filename = `stroop_${data.participantId}.csv`;
-
-  const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isMobile) {
-    const link = document.createElement("a");
-    link.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csvText);
-    link.download = filename;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    setTimeout(() => {
-      link.click();
-      setTimeout(() => link.remove(), 500);
-    }, 100);
-    return;
-  }
-
-  triggerDownload(filename, csvText);
+  exportResearcherData();
 }
 
 document.getElementById("downloadDataBtn").addEventListener("click",exportResearcherData);
+document.getElementById("shareDataBtn").addEventListener("click",shareResearcherData);
 document.getElementById("startBtn").addEventListener("click",startExperiment);
 document.getElementById("practiceBtn").addEventListener("click",startPractice);
 document.getElementById("beginExperimentBtn").addEventListener("click",startMainExperiment);
@@ -401,52 +363,5 @@ document.addEventListener("keydown",e=>{
   }
 });
 </script>
-
-<script>
-async function shareResearcherData(){
-  const result = getSavedCsv();
-  if(!result) return;
-  const file = new File(
-    [result.csv],
-    `stroop_${result.data.participantId}.csv`,
-    {type:"text/csv"}
-  );
-  if(navigator.share && navigator.canShare &&
-     navigator.canShare({files:[file]})){
-    try{
-      await navigator.share({
-        title:"Stroop Experiment Data",
-        text:"Please send this data file to the researcher.",
-        files:[file]
-      });
-      return;
-    }catch(e){
-      if(e.name === "AbortError") return;
-    }
-  }
-  copyResearcherData();
-}
-
-async function copyResearcherData(){
-  const result = getSavedCsv();
-  if(!result) return;
-  try{
-    await navigator.clipboard.writeText(result.csv);
-    alert("Data copied. Paste it into WhatsApp or email and send it to the researcher.");
-  }catch(e){
-    const ta=document.createElement("textarea");
-    ta.value=result.csv;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    ta.remove();
-    alert("Data copied. Paste it into WhatsApp or email and send it to the researcher.");
-  }
-}
-
-document.getElementById("shareDataBtn")?.addEventListener("click", shareResearcherData);
-document.getElementById("copyDataBtn")?.addEventListener("click", copyResearcherData);
-</script>
-
 </body>
 </html>
